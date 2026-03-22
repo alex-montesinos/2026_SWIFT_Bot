@@ -78,6 +78,7 @@ public final class Constants {
 
   public static final class OIConstants {
     public static final int kDriverControllerPort = 0;
+    public static final int kOperatorControllerPort = 1;
     public static final double kDriveDeadband = 0.05;
   }
 
@@ -99,4 +100,34 @@ public final class Constants {
   public static final class NeoMotorConstants {
     public static final double kFreeSpeedRpm = 5676;
   }
+
+  public static final class IntakeConstants {
+        public static final int kExtenderId = 9;
+        public static final int kRollerId = 10;
+
+        public static final double kIntakeSpeed = 0.8;
+        public static final double kExtenderSpeed = 0.4;
+        
+        public static final int kCurrentLimitAmps = 40;
+    }
+
+    public static final class ShooterConstants {
+        public static final int kShooterLeaderId = 11;  
+        public static final int kShooterFollowerId = 12; 
+        public static final int kFeederId = 13;    
+
+        public static final double kShooterTargetSpeed = 0.85;
+        public static final double kFeederSpeed = 1.0;
+
+        public static final int kShooterCurrentLimit = 60; 
+    }
+
+    public static final class ClimberConstants {
+        public static final int kClimberId = 14; 
+        
+        public static final double kClimbUpSpeed = 1.0;
+        public static final double kClimbDownSpeed = -0.6;
+        
+        public static final int kClimberCurrentLimit = 50; 
+    }
 }
