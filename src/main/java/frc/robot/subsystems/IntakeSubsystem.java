@@ -5,9 +5,11 @@ import com.revrobotics.spark.SparkBase.ControlType;
 import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 import com.revrobotics.spark.SparkMax;
+import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 import com.revrobotics.spark.config.SparkFlexConfig;
 import com.revrobotics.spark.config.SparkMaxConfig;
 
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants.IntakeConstants;
@@ -17,28 +19,38 @@ public class IntakeSubsystem extends SubsystemBase {
     private final SparkMax extenderMotor = new SparkMax(IntakeConstants.kExtenderId, MotorType.kBrushless);
     private final SparkFlex rollerMotor = new SparkFlex(IntakeConstants.kRollerId, MotorType.kBrushless);
 
-    private boolean isDeployed = true; // Tracking state for the toggle
+    private boolean isDeployed = true; // Tracking toggle state
+    private double currentTargetPosition = IntakeConstants.kPositionDeployed;
 
     public IntakeSubsystem() {
-        // Extender Config
         SparkMaxConfig extenderConfig = new SparkMaxConfig();
-        extenderConfig.smartCurrentLimit(IntakeConstants.kCurrentLimitAmps);
         
-        // Configure the PID controller
+        extenderConfig.smartCurrentLimit(IntakeConstants.kCurrentLimitAmps)
+                      .idleMode(IdleMode.kBrake); // Hold position against gravity/impacts
+        
         extenderConfig.closedLoop
             .pid(IntakeConstants.kExtenderP, IntakeConstants.kExtenderI, IntakeConstants.kExtenderD, ClosedLoopSlot.kSlot0);
             
-        // Reset encoder to 0 on startup
-        extenderMotor.getEncoder().setPosition(0);
-        extenderMotor.configure(extenderConfig, com.revrobotics.ResetMode.kResetSafeParameters, com.revrobotics.PersistMode.kPersistParameters);
+        extenderConfig.softLimit
+            .forwardSoftLimitEnabled(true)
+            .forwardSoftLimit(IntakeConstants.kPositionDeployed + 1.0) // slightly past deploy target
+            .reverseSoftLimitEnabled(true)
+            .reverseSoftLimit(IntakeConstants.kPositionRetracted - 0.5); // slightly past retract target
 
-        // Roller Config
+        // --- ROLLER CONFIG ---
         SparkFlexConfig rollerConfig = new SparkFlexConfig();
-        rollerConfig.smartCurrentLimit(IntakeConstants.kCurrentLimitAmps);
+        rollerConfig.smartCurrentLimit(IntakeConstants.kCurrentLimitAmps)
+                    .idleMode(IdleMode.kCoast);
+
+        // Apply configurations
+        extenderMotor.configure(extenderConfig, com.revrobotics.ResetMode.kResetSafeParameters, com.revrobotics.PersistMode.kPersistParameters);
         rollerMotor.configure(rollerConfig, com.revrobotics.ResetMode.kResetSafeParameters, com.revrobotics.PersistMode.kPersistParameters);
+
+        // Reset encoder to 0 on startup (Requires starting the match completely retracted!)
+        extenderMotor.getEncoder().setPosition(0);
     }
 
-    // Roller Methods
+    // --- ROLLER METHODS ---
     public void setRollerSpeed(double speed) {
         rollerMotor.set(speed);
     }
@@ -50,9 +62,15 @@ public class IntakeSubsystem extends SubsystemBase {
         ).withName("Run Intake Roller");
     }
 
-    // Extender Methods
+    // --- EXTENDER METHODS ---
     public void setExtenderPosition(double targetRotations) {
-        extenderMotor.getClosedLoopController().setSetpoint(targetRotations, ControlType.kPosition, ClosedLoopSlot.kSlot0);
+        currentTargetPosition = targetRotations;
+        
+        extenderMotor.getClosedLoopController().setSetpoint(
+            targetRotations, 
+            ControlType.kPosition, 
+            ClosedLoopSlot.kSlot0
+        );
     }
 
     public Command setPositionCommand(double targetRotations) {
@@ -66,5 +84,13 @@ public class IntakeSubsystem extends SubsystemBase {
             double target = isDeployed ? IntakeConstants.kPositionDeployed : IntakeConstants.kPositionRetracted;
             setExtenderPosition(target);
         }).withName("Toggle Intake");
+    }
+
+    @Override
+    public void periodic() {
+        // Telemetry for PID tuning
+        SmartDashboard.putNumber("Intake/Target Position", currentTargetPosition);
+        SmartDashboard.putNumber("Intake/Actual Position", extenderMotor.getEncoder().getPosition());
+        SmartDashboard.putNumber("Intake/Roller Current (A)", rollerMotor.getOutputCurrent());
     }
 }

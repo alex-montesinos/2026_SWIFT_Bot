@@ -135,6 +135,7 @@ public final class Constants {
         
         public static final double kClimbUpSpeed = 1.0;
         public static final double kClimbDownSpeed = -0.6;
+        public static final double kMaxHeightRotations = 100; //TODO: Configure
         
         public static final int kClimberCurrentLimit = 50; 
     }

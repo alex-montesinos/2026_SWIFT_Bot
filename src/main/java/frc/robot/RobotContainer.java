@@ -4,26 +4,29 @@
 
 package frc.robot;
 
+import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.auto.NamedCommands;
+
 import edu.wpi.first.math.MathUtil;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.GenericHID.RumbleType;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.RunCommand;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
+import edu.wpi.first.wpilibj2.command.button.Trigger;
 
 import frc.robot.Constants.OIConstants;
 import frc.robot.commands.AimClosedLoop;
+import frc.robot.commands.AutoShootCommand;
 import frc.robot.subsystems.DriveSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.subsystems.ClimberSubsystem;
 
-/*
- * This class is where the bulk of the robot should be declared.  Since Command-based is a
- * "declarative" paradigm, very little robot logic should actually be handled in the {@link Robot}
- * periodic methods (other than the scheduler calls).  Instead, the structure of the robot
- * (including subsystems, commands, and button mappings) should be declared here.
- */
 public class RobotContainer {
   
   // --- Subsystems ---
@@ -31,26 +34,34 @@ public class RobotContainer {
   private final IntakeSubsystem m_intake = new IntakeSubsystem();
   private final ShooterSubsystem m_shooter = new ShooterSubsystem();
   private final ClimberSubsystem m_climber = new ClimberSubsystem();
-  private final VisionSubsystem m_vision = new VisionSubsystem();
+  private final VisionSubsystem m_vision = new VisionSubsystem(m_robotDrive);
 
   // --- Controllers ---
-  // Using CommandXboxController instead of XboxController for cleaner bindings
   private final CommandXboxController m_driverController = 
       new CommandXboxController(OIConstants.kDriverControllerPort);
   private final CommandXboxController m_operatorController = 
       new CommandXboxController(OIConstants.kOperatorControllerPort);
 
-  /**
-   * The container for the robot. Contains subsystems, OI devices, and commands.
-   */
-  public RobotContainer() {
-    // Configure the button bindings
-    configureButtonBindings();
+  // --- Auto Chooser ---
+  private final SendableChooser<Command> autoChooser;
 
-    // Configure default commands
+  public RobotContainer() {
+    // PATHPLANNER NAMED COMMANDS
+    NamedCommands.registerCommand("Run Intake", m_intake.runRollerCommand(Constants.IntakeConstants.kIntakeSpeed));
+    NamedCommands.registerCommand("Deploy Intake", m_intake.setPositionCommand(Constants.IntakeConstants.kPositionDeployed));
+    NamedCommands.registerCommand("Retract Intake", m_intake.setPositionCommand(Constants.IntakeConstants.kPositionRetracted));
+    NamedCommands.registerCommand("Stop Shooter", Commands.runOnce(m_shooter::stopAll, m_shooter));
+    NamedCommands.registerCommand("Auto Shoot", new AutoShootCommand(m_shooter, m_intake, m_vision));
+    NamedCommands.registerCommand("Auto Aim", new AimClosedLoop(m_robotDrive, m_vision, null, null));
+
+    configureButtonBindings();
+    configureMatchDataTriggers();
+
+    autoChooser = AutoBuilder.buildAutoChooser();
+    
+    SmartDashboard.putData("Auto Mode", autoChooser);
+
     m_robotDrive.setDefaultCommand(
-        // The left stick controls translation of the robot.
-        // Turning is controlled by the X axis of the right stick.
         new RunCommand(
             () -> m_robotDrive.drive(
                 -MathUtil.applyDeadband(m_driverController.getLeftY(), OIConstants.kDriveDeadband),
@@ -60,78 +71,115 @@ public class RobotContainer {
             m_robotDrive));
   }
 
-  /**
-   * Use this method to define your button->command mappings.
-   */
   private void configureButtonBindings() {
-    // ==========================================
-    // DRIVER CONTROLS
-    // ==========================================
-    
-    // Right Bumper -> Set wheels to X-formation to lock defensive position
+    // --- DRIVER CONTROLS ---
     m_driverController.rightBumper()
         .whileTrue(new RunCommand(() -> m_robotDrive.setX(), m_robotDrive));
 
-    // Start Button -> Zero the gyro heading
     m_driverController.start()
         .onTrue(Commands.runOnce(() -> m_robotDrive.zeroHeading(), m_robotDrive));
 
-    // ==========================================
-    // OPERATOR CONTROLS
-    // ==========================================
-
-    // INTAKE: Left Trigger to extend and run roller, retract and stop when released
+    // --- OPERATOR CONTROLS ---
     m_operatorController.leftTrigger()
         .whileTrue(m_intake.runRollerCommand(Constants.IntakeConstants.kIntakeSpeed));
 
-    // INTAKE TOGGLE (Y)
     m_operatorController.y().onTrue(m_intake.toggleDeploymentCommand());
 
-    // SMART SHOOT & AIM (Right Trigger)
-    m_operatorController.rightTrigger().whileTrue(
-        new AimClosedLoop(
-            m_robotDrive, 
-            m_shooter, 
-            m_intake, 
-            m_vision,
-            () -> m_driverController.getLeftY(),
-            () -> m_driverController.getLeftX()
-        )
-    );
+    // SHOOT & AIM (Right Trigger)
+    // Runs the aiming drivetrain command AND the shooting command simultaneously
+        m_operatorController.rightTrigger().whileTrue(
+            Commands.parallel(
+                new AimClosedLoop(
+                    m_robotDrive, 
+                    m_vision,
+                    () -> m_driverController.getLeftY(),
+                    () -> m_driverController.getLeftX()
+                ),
+                new AutoShootCommand(m_shooter, m_intake, m_vision)
+            )
+        );
 
-    // CLIMBER: D-Pad Up to climb, D-Pad Down to lower
     m_operatorController.povUp()
         .whileTrue(m_climber.climbCommand(Constants.ClimberConstants.kClimbUpSpeed));
     m_operatorController.povDown()
         .whileTrue(m_climber.climbCommand(Constants.ClimberConstants.kClimbDownSpeed));
   }
 
-  /**
-   * Use this to pass the autonomous command to the main {@link Robot} class.
-   *
-   * @return the command to run in autonomous
-   */
+  // MATCH DATA & RUMBLE LOGIC
+  private void configureMatchDataTriggers() {
+    new Trigger(this::isHubActive)
+        .onTrue(getRumbleCommand(1.0)); 
+
+    new Trigger(this::isHubActive)
+        .onFalse(getRumbleCommand(1.5)); 
+  }
+
+  public boolean isHubActive() {
+      if (!DriverStation.isTeleopEnabled()) return false;
+      double time = DriverStation.getMatchTime();
+      
+      if (time > 130.0 || time <= 30.0) return true;
+
+      String gameData = DriverStation.getGameSpecificMessage();
+      
+      if (gameData == null || gameData.isEmpty()) return true;
+
+      var alliance = DriverStation.getAlliance();
+      boolean isRedAlliance = alliance.isPresent() && alliance.get() == DriverStation.Alliance.Red;
+      
+      boolean ourGoalInactiveFirst = (isRedAlliance && gameData.charAt(0) == 'R') || 
+                                     (!isRedAlliance && gameData.charAt(0) == 'B');
+
+      boolean isShift1 = time <= 130.0 && time > 105.0;
+      boolean isShift2 = time <= 105.0 && time > 80.0;
+      boolean isShift3 = time <= 80.0 && time > 55.0;
+      boolean isShift4 = time <= 55.0 && time > 30.0;
+
+      if (ourGoalInactiveFirst) {
+          return isShift2 || isShift4;
+      } else {
+          return isShift1 || isShift3;
+      }
+  }
+
+  public String getMatchStateString() {
+      if (DriverStation.isAutonomousEnabled()) return "AUTO";
+      if (DriverStation.isTeleopEnabled()) {
+          double t = DriverStation.getMatchTime();
+          if (t > 130.0) return "TRANSITION SHIFT";  
+          if (t > 105.0) return "SHIFT 1";           
+          if (t > 80.0)  return "SHIFT 2";           
+          if (t > 55.0)  return "SHIFT 3";           
+          if (t > 30.0)  return "SHIFT 4";           
+          return "END GAME";                         
+      }
+      return "DISABLED";
+  }
+
+  private Command getRumbleCommand(double seconds) {
+    return Commands.run(() -> {
+        m_driverController.getHID().setRumble(RumbleType.kBothRumble, 1.0);
+        m_operatorController.getHID().setRumble(RumbleType.kBothRumble, 1.0);
+    }).withTimeout(seconds)
+    .finallyDo(() -> {
+        m_driverController.getHID().setRumble(RumbleType.kBothRumble, 0.0);
+        m_operatorController.getHID().setRumble(RumbleType.kBothRumble, 0.0);
+    }).withName("Controller Rumble Alert");
+  }
+
+  public void updateDashboard() {
+      double time = Math.max(0, DriverStation.getMatchTime()); 
+      
+      int minutes = (int) (time / 60);
+      int seconds = (int) (time % 60);
+      String timeString = String.format("%d:%02d", minutes, seconds);
+
+      SmartDashboard.putString("Match/Time Remaining", timeString);
+      SmartDashboard.putString("Match/Current Shift", getMatchStateString());
+      SmartDashboard.putBoolean("Match/HUB ACTIVE", isHubActive());
+  }
+
   public Command getAutonomousCommand() {
-    // Simple Auto: Shoot preloaded then back up.
-    return Commands.sequence(
-        // 1. Spin up the shooter to target speed for 1 second
-        m_shooter.runShooterCommand(Constants.ShooterConstants.kShooterTargetSpeed)
-                 .withTimeout(1.0),
-        
-        // 2. Keep the shooter running and run the feeder to shoot the preload for 10 seconds
-        Commands.parallel(
-            m_shooter.runShooterCommand(Constants.ShooterConstants.kShooterTargetSpeed),
-            m_shooter.feedCommand(Constants.ShooterConstants.kFeederSpeed)
-        ).withTimeout(10),
-
-        // 3. Stop the shooter mechanisms
-        Commands.runOnce(m_shooter::stopAll, m_shooter),
-
-        // 4. Drive backward at 20% speed for 2 seconds to cross the mobility line
-        // drive(xSpeed, ySpeed, rot, fieldRelative)
-        Commands.run(() -> m_robotDrive.drive(-0.2, 0, 0, false), m_robotDrive)
-                .withTimeout(2.0)
-                .andThen(() -> m_robotDrive.drive(0, 0, 0, false))
-    );
+    return autoChooser.getSelected();
   }
 }

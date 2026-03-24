@@ -11,6 +11,8 @@ import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 import com.revrobotics.spark.config.SparkFlexConfig;
 
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
+import edu.wpi.first.math.filter.Debouncer;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
@@ -23,12 +25,18 @@ public class ShooterSubsystem extends SubsystemBase {
     private final RelativeEncoder encoder;
 
     private double targetRpm = 0;
-    private final double RPM_TOLERANCE = 100; // Speed margin of error
+    
+    // Speed margin of error
+    private final double RPM_TOLERANCE = 150; 
+    
+    // Requires the RPM to be within tolerance for 0.05 seconds before reporting "true"
+    private final Debouncer atSpeedDebouncer = new Debouncer(0.05, Debouncer.DebounceType.kRising);
 
+    // Feedforward: Calculates base voltage needed to hold an RPM
+    // Tune these (kS, kV, kA) using the SysId tool for true accuracy
     private final SimpleMotorFeedforward feedforward = new SimpleMotorFeedforward(0.1, 0.0015, 0);
 
     public ShooterSubsystem() {
-        // Assuming IDs based on your previous messages
         leaderMotor = new SparkFlex(22, com.revrobotics.spark.SparkLowLevel.MotorType.kBrushless);
         followerMotor = new SparkFlex(21, com.revrobotics.spark.SparkLowLevel.MotorType.kBrushless);
         feederMotor = new SparkFlex(23, com.revrobotics.spark.SparkLowLevel.MotorType.kBrushless);
@@ -40,12 +48,22 @@ public class ShooterSubsystem extends SubsystemBase {
         SparkFlexConfig followerConfig = new SparkFlexConfig();
         SparkFlexConfig feederConfig = new SparkFlexConfig();
 
-        leaderConfig.idleMode(IdleMode.kCoast).smartCurrentLimit(60);   
-        
-        followerConfig.idleMode(IdleMode.kCoast).smartCurrentLimit(60).follow(leaderMotor, true);
-        
-        feederConfig.idleMode(IdleMode.kBrake).smartCurrentLimit(40); // Brake mode prevents coasting shots
+        leaderConfig.idleMode(IdleMode.kCoast)
+                    .smartCurrentLimit(60)
+                    .closedLoopRampRate(0.25); // Takes 0.25s to reach max output (helps battery)
 
+        // Configure PID to correct for RPM
+        leaderConfig.closedLoop
+                    .pid(0.0005, 0.0, 0.0, ClosedLoopSlot.kSlot0);
+
+        followerConfig.idleMode(IdleMode.kCoast)
+                      .smartCurrentLimit(60)
+                      .follow(leaderMotor, true);
+        
+        feederConfig.idleMode(IdleMode.kBrake)
+                    .smartCurrentLimit(40); 
+
+        // Apply configurations
         leaderMotor.configure(leaderConfig, ResetMode.kResetSafeParameters, com.revrobotics.PersistMode.kPersistParameters);
         followerMotor.configure(followerConfig, ResetMode.kResetSafeParameters, com.revrobotics.PersistMode.kPersistParameters);
         feederMotor.configure(feederConfig, ResetMode.kResetSafeParameters, com.revrobotics.PersistMode.kPersistParameters);
@@ -58,6 +76,7 @@ public class ShooterSubsystem extends SubsystemBase {
             leaderMotor.set(0); 
         } else {
             double ffVoltage = feedforward.calculate(rpm);
+            
             closedLoopController.setSetpoint(
                 rpm, 
                 ControlType.kVelocity, 
@@ -72,10 +91,15 @@ public class ShooterSubsystem extends SubsystemBase {
         feederMotor.set(speed);
     }
 
+    /**
+     * Checks if the shooter is at the target RPM
+     */
     public boolean isAtSpeed(double expectedRpm) {
         if (expectedRpm == 0) return false;
-        // Checks if current velocity is within the defined tolerance
-        return Math.abs(encoder.getVelocity() - expectedRpm) <= RPM_TOLERANCE;
+        
+        boolean isCurrentlyInTolerance = Math.abs(encoder.getVelocity() - expectedRpm) <= RPM_TOLERANCE;
+        
+        return atSpeedDebouncer.calculate(isCurrentlyInTolerance);
     }
 
     // Auto/Base Commands
@@ -90,5 +114,12 @@ public class ShooterSubsystem extends SubsystemBase {
     public void stopAll() {
         setTargetRpm(0);
         setFeederSpeed(0);
+    }
+
+    @Override
+    public void periodic() {
+        SmartDashboard.putNumber("Shooter/Target RPM", targetRpm);
+        SmartDashboard.putNumber("Shooter/Current RPM", encoder.getVelocity());
+        SmartDashboard.putBoolean("Shooter/Is At Speed", isAtSpeed(targetRpm));
     }
 }

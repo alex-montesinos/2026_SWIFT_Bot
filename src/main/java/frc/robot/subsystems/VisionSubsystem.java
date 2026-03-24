@@ -4,12 +4,15 @@
 
 package frc.robot.subsystems;
 
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.utils.LimelightHelpers;
 
 public class VisionSubsystem extends SubsystemBase {
     private final String limelightName = "limelight-NAME";
+    
+    private final DriveSubsystem driveSubsystem; 
 
     // ==========================================
     // PHYSICAL CONSTANTS 
@@ -25,7 +28,9 @@ public class VisionSubsystem extends SubsystemBase {
     // The angle your camera is tilted up from perfectly horizontal (Degrees)
     private static final double CAMERA_PITCH_DEGREES = 30.0; 
 
-    public VisionSubsystem() {}
+    public VisionSubsystem(DriveSubsystem driveSubsystem) {
+        this.driveSubsystem = driveSubsystem;
+    }
 
     public boolean hasTarget() {
         return LimelightHelpers.getTV(limelightName);
@@ -34,7 +39,7 @@ public class VisionSubsystem extends SubsystemBase {
     public double getTx() {
         LimelightHelpers.RawFiducial[] fiducials = LimelightHelpers.getRawFiducials(limelightName);
         
-        // Average the TX if multiple tags on the hub are visible to prevent jitter
+        // Average TX to prevent jitter
         if (fiducials.length >= 2) {
             double tx1 = fiducials[0].txnc;
             double tx2 = fiducials[1].txnc;
@@ -50,7 +55,7 @@ public class VisionSubsystem extends SubsystemBase {
     public double getTy() {
         LimelightHelpers.RawFiducial[] fiducials = LimelightHelpers.getRawFiducials(limelightName);
         
-        // Average the TY if multiple tags on the hub are visible
+        // Average TY
         if (fiducials.length >= 2) {
             double ty1 = fiducials[0].tync;
             double ty2 = fiducials[1].tync;
@@ -81,9 +86,24 @@ public class VisionSubsystem extends SubsystemBase {
 
     @Override
     public void periodic() {
+        // Get the MegaTag Pose Estimate (Always standardizes to Blue Alliance origin)
+        LimelightHelpers.PoseEstimate limelightMeasurement = LimelightHelpers.getBotPoseEstimate_wpiBlue(limelightName);
+        
+        if (limelightMeasurement != null && limelightMeasurement.tagCount > 0) {
+            driveSubsystem.addVisionMeasurement(
+                limelightMeasurement.pose, 
+                limelightMeasurement.timestampSeconds
+            );
+        }
+
         SmartDashboard.putBoolean("Vision/Has Target", hasTarget());
         SmartDashboard.putNumber("Vision/TX (Aiming)", getTx());
         SmartDashboard.putNumber("Vision/TY", getTy());
         SmartDashboard.putNumber("Vision/Calculated Distance (m)", getDistanceToTargetMeters());
+        
+        Pose2d currentPose = driveSubsystem.getPose();
+        SmartDashboard.putNumber("Robot X", currentPose.getX());
+        SmartDashboard.putNumber("Robot Y", currentPose.getY());
+        SmartDashboard.putNumber("Robot Heading", currentPose.getRotation().getDegrees());
     }
 }
