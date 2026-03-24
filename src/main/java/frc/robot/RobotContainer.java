@@ -11,8 +11,10 @@ import edu.wpi.first.wpilibj2.command.RunCommand;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 
 import frc.robot.Constants.OIConstants;
+import frc.robot.commands.AimClosedLoop;
 import frc.robot.subsystems.DriveSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
+import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.subsystems.ClimberSubsystem;
 
@@ -29,6 +31,7 @@ public class RobotContainer {
   private final IntakeSubsystem m_intake = new IntakeSubsystem();
   private final ShooterSubsystem m_shooter = new ShooterSubsystem();
   private final ClimberSubsystem m_climber = new ClimberSubsystem();
+  private final VisionSubsystem m_vision = new VisionSubsystem();
 
   // --- Controllers ---
   // Using CommandXboxController instead of XboxController for cleaner bindings
@@ -77,19 +80,24 @@ public class RobotContainer {
     // OPERATOR CONTROLS
     // ==========================================
 
-    // INTAKE: Right Trigger to extend and run roller, retract and stop when released
-    m_operatorController.rightTrigger()
-        .whileTrue(m_intake.extendCommand(Constants.IntakeConstants.kExtenderSpeed)
-            .alongWith(m_intake.runRollerCommand(Constants.IntakeConstants.kIntakeSpeed)))
-        .onFalse(m_intake.extendCommand(-Constants.IntakeConstants.kExtenderSpeed).withTimeout(0.5));
+    // INTAKE: Left Trigger to extend and run roller, retract and stop when released
+    m_operatorController.leftTrigger()
+        .whileTrue(m_intake.runRollerCommand(Constants.IntakeConstants.kIntakeSpeed));
 
-    // SHOOTER: Right Bumper to spin up Vortex motors
-    m_operatorController.rightBumper()
-        .whileTrue(m_shooter.runShooterCommand(Constants.ShooterConstants.kShooterTargetSpeed));
+    // INTAKE TOGGLE (Y)
+    m_operatorController.y().onTrue(m_intake.toggleDeploymentCommand());
 
-    // FEEDER: Left Bumper to feed the FUEL into the spun-up shooter
-    m_operatorController.leftBumper()
-        .whileTrue(m_shooter.feedCommand(Constants.ShooterConstants.kFeederSpeed));
+    // SMART SHOOT & AIM (Right Trigger)
+    m_operatorController.rightTrigger().whileTrue(
+        new AimClosedLoop(
+            m_robotDrive, 
+            m_shooter, 
+            m_intake, 
+            m_vision,
+            () -> m_driverController.getLeftY(),
+            () -> m_driverController.getLeftX()
+        )
+    );
 
     // CLIMBER: D-Pad Up to climb, D-Pad Down to lower
     m_operatorController.povUp()

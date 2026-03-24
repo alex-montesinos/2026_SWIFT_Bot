@@ -102,14 +102,22 @@ public final class Constants {
   }
 
   public static final class IntakeConstants {
-        public static final int kExtenderId = 9;
-        public static final int kRollerId = 10;
+    public static final int kExtenderId = 9;  
+    public static final int kRollerId = 10;   
 
-        public static final double kIntakeSpeed = 0.8;
-        public static final double kExtenderSpeed = 0.4;
-        
-        public static final int kCurrentLimitAmps = 40;
-    }
+    public static final double kIntakeSpeed = 0.8;
+    public static final int kCurrentLimitAmps = 40;
+
+    // Extender Closed-Loop Constants
+    public static final double kExtenderP = 0.05; // TODO: tune this
+    public static final double kExtenderI = 0.0;
+    public static final double kExtenderD = 0.0;
+
+    // Extender Positions (Rotations)
+    public static final double kPositionRetracted = 0.0;
+    public static final double kPositionDeployed = 15.0; // Tune based on gearing
+    public static final double kPositionAgitate = 10.0;  // Slight retraction to push balls into feeder
+}
 
     public static final class ShooterConstants {
         public static final int kShooterLeaderId = 11;  
